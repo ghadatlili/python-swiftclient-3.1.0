@@ -14,9 +14,16 @@
 # limitations under the License.
 from __future__ import unicode_literals
 import logging
-
+import glob
+from twisted.internet import task
+from twisted.internet import reactor
+import swiftclient.scheduling
 import os
-
+import datetime, threading, time
+from time import sleep
+from swiftclient.shell import *
+import datetime
+from collections import defaultdict
 from concurrent.futures import as_completed, CancelledError, TimeoutError
 from copy import deepcopy
 from errno import EEXIST, ENOENT
@@ -27,17 +34,17 @@ from os.path import (
 )
 from posixpath import join as urljoin
 from random import shuffle
-from time import time
+from time import *
 from threading import Thread
 from six import StringIO, text_type
-from six.moves.queue import Queue
-from six.moves.queue import Empty as QueueEmpty
+from queue import Queue
+from queue import Empty as QueueEmpty
 from six.moves.urllib.parse import quote
 from six import Iterator, string_types
 
 import json
 
-
+import swiftclient
 from swiftclient import Connection
 from swiftclient.command_helpers import (
     stat_account, stat_container, stat_object
@@ -51,8 +58,29 @@ from swiftclient.multithreading import MultiThreadingManager
 
 
 logger = logging.getLogger("swiftclient.service")
+global avail_bw ;
 
+class ThreadingExample(object):
+    """ Threading example class
+    The run() method will be started and it will run in the background
+    until the application exits.
+    """
 
+    def __init__(self, interval=1):
+        """ Constructor
+        :type interval: int
+        :param interval: Check interval, in seconds
+        """
+        self.interval = interval
+
+        thread = threading.Thread(target=self.run, args=())
+        thread.daemon = True                            # Daemonize thread
+        thread.start()                                  # Start the execution
+
+    def run(self):
+        """ Method that runs forever """
+        while True:
+            print('Doing something imporant in the background',swiftclient.shell.sum_data) ; sleep(self.interval)
 class ResultsIterator(Iterator):
     def __init__(self, futures):
         self.futures = interruptable_as_completed(futures)
@@ -373,6 +401,7 @@ class _SwiftReader(object):
     errors on failures caused by either invalid md5sum or size of the
     data read.
     """
+    global avail_bw ; avail_bw=0
     def __init__(self, path, body, headers, checksum=True):
         self._path = path
         self._body = body
@@ -1077,15 +1106,195 @@ class SwiftService(object):
             if options['out_file'] and len(objects) > 1:
                 options['out_file'] = None
 
-            o_downs = [
-                self.thread_manager.object_dd_pool.submit(
-                    self._download_object_job, container, obj, options
-                ) for obj in objects
-            ]
+            algoChoice = 0;
+            global timeline;
+            timeline = 30;
+            ts = swiftclient.functions.tscalcul();
+            nbMaxThr = 100;
+            global countNotAssigned1;
+            countNotAssigned1 = 0;
+            global savedObs;
+            global transferedThr;
+            transferedThr = [];
+            global nbslots;
+            nbslots = [0] * 1200;
+            global iTransList;
+            global rejR;
+            rejR = []
+            global sched_dict; global sum_meet_deadline ; global sum_data ; global avail_bw ; global sum_bw_consumption
+            sched_dict = defaultdict(list);
+            global rejR;
+            rejR = [];
+            global usedThr_dict;
+            usedThr_dict = {};
+            usedThr_dict = defaultdict(lambda: 0, usedThr_dict)
+            now = datetime.datetime.now()
+            print(datetime.datetime.now())
+            end = now + datetime.timedelta(seconds=timeline)
+            print(end);
+            tsNum = 0;
+            print("timeline = ", timeline)
+            l = [];
+            l.append(now);
+            '''objects2 = ["4_/home/AN28060/Desktop/d4 (copy).txt", "5_/home/AN28060/Desktop/d5 (copy).txt",
+                        "4_/home/AN28060/Desktop/d42 (copy).txt", "4_/home/AN28060/Desktop/d43 (copy).txt",
+                        "5_/home/AN28060/Desktop/d51 (copy).txt", "6_/home/AN28060/Desktop/d6 (copy).txt",
+                        "6_/home/AN28060/Desktop/d61 (copy).txt", "7_/home/AN28060/Desktop/d7 (copy).txt",
+                        "7_/home/AN28060/Desktop/d71 (copy).txt", "8_/home/AN28060/Desktop/d8 (copy).txt",
+                        "8_/home/AN28060/Desktop/d81 (copy).txt", "8_/home/AN28060/Desktop/d82 (copy).txt"]'''
+            #objects2 = ["403K/403K_1.dat"]
+            objects1 = glob.glob("/home/AN28060/WorkSpace/Scripts/403K/*.dat"); objects3 = glob.glob("/home/AN28060/WorkSpace/Scripts/678B/*.dat");
+            objects2 = glob.glob("/home/AN28060/WorkSpace/Scripts/678B/*.dat"); objects4 = glob.glob("/home/AN28060/WorkSpace/Scripts/26K/*.dat");
+            objects5 = glob.glob("/home/AN28060/WorkSpace/Scripts/403K/*.dat"); objects6 = glob.glob("/home/AN28060/WorkSpace/Scripts/678B/*.dat");
 
-            for o_down in interruptable_as_completed(o_downs):
-                yield o_down.result()
+            sum_bw_consumption = 0
+            while now <= end and tsNum < timeline:
+                now += datetime.timedelta(seconds=ts);
+                print ("now",now)
+                l.append(now);
+                if l[tsNum + 1] == l[tsNum] + datetime.timedelta(seconds=ts):
+                    tsNum = tsNum + 1;
+                    print("      tsnum :", tsNum); swiftclient.shell.sum_data = 0
+                    if tsNum == 1:
+                        objects=[]
+                        for i in range(len(objects1)):
+                            objects.append(objects1[i].split("/",5)[5])
+                        print("o",objects);
+                    if tsNum == 2:
+                        for i in range(len(objects2)):
+                            iTransList.append(objects2[i].split("/",5)[5])
+                        objs = iTransList; print("objects = ", objects);
+                    if tsNum == 3:
+                        for i in range(len(objects3)):
+                            iTransList.append(objects3[i].split("/",5)[5]) ;
+                        for i in range(len(objects4)):
+                            iTransList.append(objects4[i].split("/",5)[5])
+                        objs = iTransList; print("objects = ", objects)
+                    if tsNum == 4:
+                        for i in range(len(objects5)):
+                            iTransList.append(objects5[i].split("/",5)[5]) ;
+                        for i in range(len(objects6)):
+                            iTransList.append(objects6[i].split("/",5)[5])
+                        objs = iTransList; print("objects = ", objects)
+                    sched_dict, objs, iTransList = swiftclient.scheduling.schedule_requests_per_ts(algoChoice, tsNum, ts, nbMaxThr, timeline, objects);
+                    # else: objs = objects ;
+                    print ("              ************************    iTransList",iTransList)
+                    if algoChoice == 1:
+                        nbslots = swiftclient.scheduling.checkRequestScheduled(objs);
+                        print("nbslots ", nbslots);
+                        print("objs", objs);
+                        sched_dict = swiftclient.scheduling.switchTS(tsNum, ts, objs, nbslots, nbMaxThr, timeline, sched_dict, usedThr_dict);
+                    sleep(ts);
+                    print ("objs",objs) ; '''objects = objects.extend(iTransList);
+                    for i in range(len(objs)):
+                        if len(objs[i].split("_", 1)) == 2:
+                            objects.append(objs[i].split("_", 1)[1])
+                            i = i + 1'''
 
+                    objects = [] ; print (len(sched_dict))
+                    if tsNum in sched_dict: print (sched_dict[tsNum])
+                    for i in range(len(objs)):
+                        print("len(objs[i].split(""))", len(objs[i].split("_")))
+                        if objs[i] in sched_dict[tsNum] and len(objs[i].split("_",1)) == 2 :
+                            objects.append(objs[i].split("_",1)[1])
+                        if objs[i] in sched_dict[tsNum] and len(objs[i].split("_",1)) == 3 :
+                            print ("here") ;objects.append(objs[i].split("_",1)[1]+"_"+objs[i].split("_",1)[2])
+                    print ("objects to download ", objects)
+                    o_downs = [
+                        self.thread_manager.object_dd_pool.submit(
+                            self._download_object_job, container, obj, options
+                        ) for obj in objects
+                    ]
+                    global sum_bw_consumption
+                    for o_down in interruptable_as_completed(o_downs):
+                        yield o_down.result()
+                    print (swiftclient.shell.down_dict) ;
+                    if len(swiftclient.shell.down_dict) != 0:
+                       proportion = swiftclient.shell.sum_meet_deadline / len(swiftclient.shell.down_dict)
+                    print ("sum_meet_deadline ", swiftclient.shell.sum_meet_deadline) ; print ("proportion_meet_deadline ", proportion)
+                    print("sum_data ", swiftclient.shell.sum_data)
+                    avail_bw = swiftclient.shell.sum_data / swiftclient.functions.tscalcul(); print ("avail_bw",avail_bw)
+                    sum_bw_consumption += avail_bw ;    #timerThread = threading.Thread(target=self.foo()) ; timerThread.start()
+                    #example = ThreadingExample(); sleep(3); print('Checkpoint'); sleep(2); print('Bye')
+                    #sleep(1) ; #print('Doing something imporant in the background', swiftclient.shell.sum_data);previous_data = swiftclient.shell.sum_data ;
+                    l = task.LoopingCall(self.doWork) ; l.start(5)  ;                    reactor.run()
+
+                #exit()
+            avg_bw_consuption = sum_bw_consumption / tsNum
+            print("sum_bw_consuption",sum_bw_consumption,"tsNum",tsNum)
+
+    '''def f(self):
+        global sum_bw_consumption
+        print(sum_bw_consumption,"***************************************************************************************************************")# do something here ...
+    # call f() again in 60 seconds
+        threading.Timer(60, self.f()).start()'''
+
+    def doWork(self):
+        print (" do work here")
+        pass
+
+
+    def foo(self):
+        next_call = time()
+        while True:
+            print ( datetime.datetime.now())
+            next_call = next_call + 1;
+            sleep(next_call - time())
+
+
+
+    def schedule_requests1(algoChoice, timeline, objects):  # timeline is the number of timeslots
+        ts = swiftclient.functions.tscalcul();
+        nbMaxThr = 100;
+        global countNotAssigned1;
+        countNotAssigned1 = 0;
+        global savedObs;
+        global transferedThr;
+        transferedThr = [];
+        global nbslots;
+        nbslots = [0] * 1200;
+        global iTransList;
+        global rejR;
+        rejR = []
+        global sched_dict;
+        sched_dict = defaultdict(list);
+        global rejR;
+        rejR = [];
+        global usedThr_dict;
+        usedThr_dict = {};
+        usedThr_dict = defaultdict(lambda: 0, usedThr_dict)
+        now = datetime.datetime.now()
+        print(datetime.datetime.now())
+        end = now + datetime.timedelta(seconds=timeline)
+        print(end);
+        tsNum = 0;
+        print("timeline = ", timeline)
+        l = [];
+        l.append(now);
+        objects2 = ["4_/home/AN28060/Desktop/d4 (copy).txt", "5_/home/AN28060/Desktop/d5 (copy).txt",
+                    "4_/home/AN28060/Desktop/d42 (copy).txt", "4_/home/AN28060/Desktop/d43 (copy).txt",
+                    "5_/home/AN28060/Desktop/d51 (copy).txt", "6_/home/AN28060/Desktop/d6 (copy).txt",
+                    "6_/home/AN28060/Desktop/d61 (copy).txt", "7_/home/AN28060/Desktop/d7 (copy).txt",
+                    "7_/home/AN28060/Desktop/d71 (copy).txt", "8_/home/AN28060/Desktop/d8 (copy).txt",
+                    "8_/home/AN28060/Desktop/d81 (copy).txt", "8_/home/AN28060/Desktop/d82 (copy).txt"]
+        while now <= end and tsNum < timeline:
+            now += datetime.timedelta(seconds=ts);
+            l.append(now);
+            if l[tsNum + 1] == l[tsNum] + datetime.timedelta(seconds=ts):
+                tsNum = tsNum + 1;
+                print("      tsnum :", tsNum);
+                sched_dict, objs, iTransList = schedule_requests_per_ts(algoChoice, tsNum, ts, nbMaxThr, timeline,
+                                                                        objects);
+                if tsNum == 4: iTransList.extend(objects2);objs = iTransList; print("objects = ", objects)
+                # else: objs = objects ;
+                if algoChoice == 1:
+                    nbslots = checkRequestScheduled(objs);
+                    print("nbslots ", nbslots);
+                    print("objs", objs);
+                    sched_dict = switchTS(tsNum, ts, objs, nbslots, nbMaxThr, timeline, sched_dict, usedThr_dict);
+                    time.sleep(ts);
+
+        return sched_dict
     def _download_object_job(self, conn, container, obj, options):
         out_file = options['out_file']
         results_dict = {}

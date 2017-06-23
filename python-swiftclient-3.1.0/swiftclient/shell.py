@@ -15,7 +15,7 @@
 # limitations under the License.
 
 from __future__ import print_function, unicode_literals
-
+from swiftclient.functions import *
 import argparse
 import json
 import logging
@@ -40,7 +40,7 @@ from swiftclient.service import SwiftService, SwiftError, \
     SwiftUploadObject, get_conn, process_options
 from swiftclient.command_helpers import print_account_stats, \
     print_container_stats, print_object_stats
-
+from collections import defaultdict
 try:
     from shlex import quote as sh_quote
 except ImportError:
@@ -50,7 +50,8 @@ BASENAME = 'swift'
 commands = ('delete', 'download', 'list', 'post', 'copy', 'stat', 'upload',
             'capabilities', 'info', 'tempurl', 'auth')
 
-
+global down_dict ;   down_dict = defaultdict(list) ; global sum_bw_consumption ; sum_bw_consumption = 0
+global sum_meet_deadline ; sum_meet_deadline = 0  ; global sum_data ;  sum_data = 0
 def immediate_exit(signum, frame):
     stderr.write(" Aborted\n")
     os_exit(2)
@@ -263,8 +264,8 @@ Optional arguments:
                         they are listed in the object store.
 '''.strip("\n")
 
-
 def st_download(parser, args, output_manager):
+    global down_dict ; down_dict  = defaultdict(list) ;global deadlines ; global sum_meet_deadline ; global sum_data ; global sum_bw_consumption
     parser.add_argument(
         '-a', '--all', action='store_true', dest='yes_all',
         default=False, help='Indicates that you really want to download '
@@ -373,8 +374,8 @@ def st_download(parser, args, output_manager):
                     down_iter = swift.download(container)
                 else:
                     down_iter = swift.download(container, objects)
-
             for down in down_iter:
+
                 if options['out_file'] == '-' and 'contents' in down:
                     contents = down['contents']
                     for chunk in contents:
@@ -391,6 +392,11 @@ def st_download(parser, args, output_manager):
                             attempts = down['attempts']
                             total_time = finish_time - start_time
                             down_time = total_time - auth_time
+                            down_dict[down['object']].append(total_time)
+                            sum_data += down_dict[down['object']][1]
+                            if len(down_dict[down['object']]) == 3 :
+                                if float(down_dict[down['object']][2]/tscalcul()) <= int(down_dict[down['object']][0]):
+                                    sum_meet_deadline += 1
                             _mega = 1000000
                             if down['pseudodir']:
                                 time_str = (
